@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./stocktalk_dev.db"
     supabase_url: str = ""
     supabase_service_role_key: str = ""
+    supabase_bucket: str = "stocktalk-attachments"
 
     model_config = SettingsConfigDict(
         env_file=".env",

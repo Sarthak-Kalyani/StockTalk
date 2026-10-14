@@ -1,5 +1,18 @@
 import math
 
+import uuid
+from pathlib import Path
+
+from fastapi import WebSocket, WebSocketDisconnect
+from app.database import SessionLocal
+
+from fastapi.staticfiles import StaticFiles
+
+from fastapi import UploadFile, File, Form
+from supabase import create_client
+
+from app.schemas import AttachmentResponse
+
 from sqlalchemy import select, or_
 from app.schemas import ConversationCreate, ConversationResponse, MessageCreate, MessageResponse
 from app.schemas import VendorLocationCreate, VendorLocationResponse
@@ -13,6 +26,54 @@ from app.config import settings
 from app.database import Base, engine, get_db
 from app import models
 from app.schemas import CatalogueCreate, CatalogueResponse
+
+def get_supabase_client():
+    if not settings.supabase_url or not settings.supabase_service_role_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Supabase credentials are not configured."
+        )
+
+    return create_client(
+        settings.supabase_url,
+        settings.supabase_service_role_key
+    )
+
+
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, conversation_id: int, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.setdefault(
+            conversation_id, []
+        ).append(websocket)
+
+    def disconnect(self, conversation_id: int, websocket: WebSocket):
+        connections = self.active_connections.get(conversation_id, [])
+
+        if websocket in connections:
+            connections.remove(websocket)
+
+        if not connections:
+            self.active_connections.pop(conversation_id, None)
+
+    async def broadcast(self, conversation_id: int, message: dict):
+        connections = self.active_connections.get(
+            conversation_id, []
+        ).copy()
+
+        for connection in connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                self.disconnect(conversation_id, connection)
+
+
+chat_manager = ConnectionManager()
+
 
 
 @asynccontextmanager
@@ -416,3 +477,425 @@ def get_messages(
     ).all()
 
     return messages
+
+
+ALLOWED_FILES = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".pdf": "application/pdf",
+}
+
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+@app.post(
+    "/conversations/{conversation_id}/attachments",
+    response_model=AttachmentResponse,
+    status_code=201
+)
+async def upload_attachment(
+    conversation_id: int,
+    sender_id: int = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    conversation = db.query(models.Conversation).filter(
+        models.Conversation.id == conversation_id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found."
+        )
+
+    if sender_id not in (
+        conversation.shopkeeper_id,
+        conversation.vendor_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a participant in this conversation."
+        )
+
+    extension = Path(file.filename or "").suffix.lower()
+    expected_type = ALLOWED_FILES.get(extension)
+
+    if not expected_type:
+        raise HTTPException(
+            status_code=400,
+            detail="Only JPG, PNG, GIF, WEBP, and PDF files are allowed."
+        )
+
+    if file.content_type != expected_type:
+        raise HTTPException(
+            status_code=400,
+            detail="File type does not match its extension."
+        )
+
+    contents = await file.read(MAX_FILE_SIZE + 1)
+
+    if not contents:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is empty."
+        )
+
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="File size must not exceed 10 MB."
+        )
+
+    # Check the file signature, not just its filename.
+    valid_signature = (
+        (extension in (".jpg", ".jpeg")
+         and contents.startswith(b"\xff\xd8\xff"))
+        or (extension == ".png"
+            and contents.startswith(b"\x89PNG\r\n\x1a\n"))
+        or (extension == ".gif"
+            and contents.startswith((b"GIF87a", b"GIF89a")))
+        or (extension == ".webp"
+            and len(contents) >= 12
+            and contents[:4] == b"RIFF"
+            and contents[8:12] == b"WEBP")
+        or (extension == ".pdf"
+            and contents.startswith(b"%PDF-"))
+    )
+
+    if not valid_signature:
+        raise HTTPException(
+            status_code=400,
+            detail="The file content does not match an allowed file type."
+        )
+
+    safe_name = f"{uuid.uuid4().hex}{extension}"
+    storage_path = f"conversation-{conversation_id}/{safe_name}"
+
+    try:
+        supabase = get_supabase_client()
+
+        supabase.storage.from_(
+            settings.supabase_bucket
+        ).upload(
+            storage_path,
+            contents,
+            file_options={
+                "content-type": expected_type,
+                "upsert": "false"
+            }
+        )
+
+    except Exception as exc:
+        print(f"Attachment upload failed: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not upload file to storage. Check server logs."
+        ) from exc
+
+    attachment = models.ChatAttachment(
+        conversation_id=conversation_id,
+        sender_id=sender_id,
+        original_filename=Path(file.filename or "attachment").name[:255],
+        storage_path=storage_path,
+        content_type=expected_type,
+        size_bytes=len(contents)
+    )
+
+    try:
+        db.add(attachment)
+        db.commit()
+        db.refresh(attachment)
+    except Exception as exc:
+        db.rollback()
+        # The uploaded object may remain in storage if the database fails.
+        raise HTTPException(
+            status_code=500,
+            detail="File uploaded, but saving its record failed."
+        ) from exc
+    finally:
+        await file.close()
+
+    return attachment
+
+
+@app.get(
+    "/conversations/{conversation_id}/attachments/{attachment_id}/download"
+)
+def get_attachment_download_url(
+    conversation_id: int,
+    attachment_id: int,
+    user_id: int = Query(gt=0),
+    db: Session = Depends(get_db)
+):
+    conversation = db.query(models.Conversation).filter(
+        models.Conversation.id == conversation_id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found."
+        )
+
+    if user_id not in (
+        conversation.shopkeeper_id,
+        conversation.vendor_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a participant in this conversation."
+        )
+
+    attachment = db.query(models.ChatAttachment).filter(
+        models.ChatAttachment.id == attachment_id,
+        models.ChatAttachment.conversation_id == conversation_id
+    ).first()
+
+    if not attachment:
+        raise HTTPException(
+            status_code=404,
+            detail="Attachment not found."
+        )
+
+    try:
+        result = get_supabase_client().storage.from_(
+            settings.supabase_bucket
+        ).create_signed_url(
+            attachment.storage_path,
+            300
+        )
+
+        signed_url = result.get("signedURL") or result.get("signedUrl")
+
+        if not signed_url:
+            raise ValueError("Supabase did not return a signed URL.")
+
+        return {
+            "attachment_id": attachment.id,
+            "filename": attachment.original_filename,
+            "content_type": attachment.content_type,
+            "size_bytes": attachment.size_bytes,
+            "expires_in_seconds": 300,
+            "download_url": signed_url
+        }
+
+    except Exception as exc:
+        print(f"Signed URL creation failed: {exc}")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not generate a download link."
+        ) from exc
+
+
+@app.get(
+    "/conversations/{conversation_id}/attachments",
+    response_model=list[AttachmentResponse]
+)
+def list_attachments(
+    conversation_id: int,
+    user_id: int = Query(gt=0),
+    db: Session = Depends(get_db)
+):
+    conversation = db.query(models.Conversation).filter(
+        models.Conversation.id == conversation_id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found."
+        )
+
+    if user_id not in (
+        conversation.shopkeeper_id,
+        conversation.vendor_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a participant in this conversation."
+        )
+
+    attachments = db.query(models.ChatAttachment).filter(
+        models.ChatAttachment.conversation_id == conversation_id
+    ).order_by(
+        models.ChatAttachment.id.desc()
+    ).all()
+
+    return attachments
+
+
+@app.post("/conversations/{conversation_id}/read")
+def mark_messages_as_read(
+    conversation_id: int,
+    user_id: int = Query(gt=0),
+    db: Session = Depends(get_db)
+):
+    conversation = db.query(models.Conversation).filter(
+        models.Conversation.id == conversation_id
+    ).first()
+
+    if not conversation:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found."
+        )
+
+    if user_id not in (
+        conversation.shopkeeper_id,
+        conversation.vendor_id
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not a participant in this conversation."
+        )
+
+    # Mark only messages sent by the other participant as read.
+    updated_count = db.query(models.Message).filter(
+        models.Message.conversation_id == conversation_id,
+        models.Message.sender_id != user_id,
+        models.Message.is_read == False
+    ).update(
+        {models.Message.is_read: True},
+        synchronize_session=False
+    )
+
+    db.commit()
+
+    return {
+        "conversation_id": conversation_id,
+        "reader_id": user_id,
+        "messages_marked_as_read": updated_count
+    }
+
+
+@app.get("/conversations/unread-counts")
+def get_unread_counts(
+    user_id: int = Query(gt=0),
+    db: Session = Depends(get_db)
+):
+    conversations = db.query(models.Conversation).filter(
+        or_(
+            models.Conversation.shopkeeper_id == user_id,
+            models.Conversation.vendor_id == user_id
+        )
+    ).all()
+
+    results = []
+
+    for conversation in conversations:
+        unread_count = db.query(models.Message).filter(
+            models.Message.conversation_id == conversation.id,
+            models.Message.sender_id != user_id,
+            models.Message.is_read == False
+        ).count()
+
+        other_user_id = (
+            conversation.vendor_id
+            if conversation.shopkeeper_id == user_id
+            else conversation.shopkeeper_id
+        )
+
+        results.append({
+            "conversation_id": conversation.id,
+            "other_user_id": other_user_id,
+            "unread_count": unread_count
+        })
+
+    return {
+        "user_id": user_id,
+        "conversations": results
+    }
+
+
+
+@app.websocket("/ws/conversations/{conversation_id}")
+async def websocket_chat(
+    websocket: WebSocket,
+    conversation_id: int,
+    user_id: int
+):
+    db = SessionLocal()
+
+    try:
+        conversation = db.query(models.Conversation).filter(
+            models.Conversation.id == conversation_id
+        ).first()
+
+        if not conversation:
+            await websocket.close(
+                code=1008,
+                reason="Conversation not found."
+            )
+            return
+
+        if user_id not in (
+            conversation.shopkeeper_id,
+            conversation.vendor_id
+        ):
+            await websocket.close(
+                code=1008,
+                reason="You are not a participant."
+            )
+            return
+
+        await chat_manager.connect(conversation_id, websocket)
+
+        while True:
+            payload = await websocket.receive_json()
+            content = payload.get("content")
+
+            if not isinstance(content, str):
+                await websocket.send_json({
+                    "error": "Message content must be text."
+                })
+                continue
+
+            content = content.strip()
+
+            if not content or len(content) > 5000:
+                await websocket.send_json({
+                    "error": "Message must contain 1–5000 characters."
+                })
+                continue
+
+            # The sender ID comes from the connection, not the message body.
+            message = models.Message(
+                conversation_id=conversation_id,
+                sender_id=user_id,
+                content=content
+            )
+
+            db.add(message)
+            db.commit()
+            db.refresh(message)
+
+            event = {
+                "id": message.id,
+                "conversation_id": message.conversation_id,
+                "sender_id": message.sender_id,
+                "content": message.content,
+                "is_read": message.is_read,
+                "created_at": (
+                    message.created_at.isoformat()
+                    if message.created_at else None
+                )
+            }
+
+            await chat_manager.broadcast(conversation_id, event)
+
+    except WebSocketDisconnect:
+        pass
+
+    finally:
+        chat_manager.disconnect(conversation_id, websocket)
+        db.close()
+
+app.mount(
+    "/frontend",
+    StaticFiles(directory="frontend", html=True),
+    name="frontend"
+)

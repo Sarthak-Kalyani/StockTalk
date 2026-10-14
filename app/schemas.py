@@ -92,3 +92,15 @@ class MessageResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class AttachmentResponse(BaseModel):
+    id: int
+    conversation_id: int
+    sender_id: int
+    original_filename: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

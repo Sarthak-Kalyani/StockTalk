@@ -1,0 +1,576 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StockTalk | B2B Chat</title>
+
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f1f5f9;
+      color: #172033;
+    }
+
+    header {
+      background: #102a43;
+      color: white;
+      padding: 18px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    header h1 { margin: 0; font-size: 23px; }
+    header p { margin: 5px 0 0; color: #cbd5e1; font-size: 13px; }
+
+    .status {
+      font-size: 13px;
+      background: #334155;
+      padding: 8px 12px;
+      border-radius: 20px;
+    }
+
+    .status.online { background: #166534; }
+    .status.offline { background: #991b1b; }
+
+    main {
+      max-width: 900px;
+      margin: 28px auto;
+      padding: 0 16px;
+    }
+
+    .panel {
+      background: white;
+      border-radius: 14px;
+      box-shadow: 0 4px 18px #0f172a0d;
+      overflow: hidden;
+    }
+
+    .settings {
+      display: flex;
+      gap: 12px;
+      align-items: end;
+      padding: 18px;
+      border-bottom: 1px solid #e2e8f0;
+      flex-wrap: wrap;
+    }
+
+    .field { flex: 1; min-width: 140px; }
+
+    label {
+      display: block;
+      font-size: 12px;
+      color: #64748b;
+      margin-bottom: 7px;
+    }
+
+    input, select, button {
+      font: inherit;
+      border-radius: 8px;
+      padding: 11px;
+    }
+
+    input, select {
+      border: 1px solid #cbd5e1;
+      width: 100%;
+      background: white;
+    }
+
+    button {
+      border: 0;
+      background: #087e8b;
+      color: white;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    button:hover { background: #066773; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+
+    .chat-title {
+      padding: 16px 20px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+
+    .chat-title h2 { font-size: 17px; margin: 0 0 5px; }
+    .chat-title p { font-size: 12px; color: #64748b; margin: 0; }
+
+    #messages {
+      height: 420px;
+      overflow-y: auto;
+      padding: 20px;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .message { max-width: 78%; align-self: flex-start; }
+    .message.mine { align-self: flex-end; }
+
+    .sender {
+      font-size: 11px;
+      color: #64748b;
+      margin: 0 0 5px 4px;
+    }
+
+    .bubble {
+      padding: 12px 15px;
+      border-radius: 14px 14px 14px 3px;
+      background: white;
+      border: 1px solid #e2e8f0;
+      overflow-wrap: anywhere;
+      white-space: pre-wrap;
+    }
+
+    .mine .bubble {
+      background: #d9f5ed;
+      border-color: #b7e8db;
+      border-radius: 14px 14px 3px 14px;
+    }
+
+    .time {
+      font-size: 10px;
+      color: #64748b;
+      margin: 5px 4px 0;
+    }
+
+    #empty {
+      margin: auto;
+      color: #64748b;
+      text-align: center;
+      font-size: 14px;
+    }
+
+    .composer {
+      display: flex;
+      gap: 10px;
+      padding: 16px;
+      border-top: 1px solid #e2e8f0;
+    }
+
+    .composer input { flex: 1; min-width: 0; }
+
+    #notice {
+      padding: 10px 16px;
+      font-size: 12px;
+      color: #475569;
+      background: #f8fafc;
+      min-height: 34px;
+    }
+
+    @media (max-width: 550px) {
+      main { margin: 12px auto; padding: 0 8px; }
+      #messages { height: 55vh; }
+      .message { max-width: 90%; }
+      .composer { padding: 10px; }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div>
+      <h1>StockTalk</h1>
+      <p>B2B marketplace · Shopkeeper and vendor chat</p>
+    </div>
+    <span id="status" class="status offline">Disconnected</span>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="settings">
+        <div class="field">
+          <label for="userId">Demo user</label>
+          <select id="userId">
+            <option value="100">Shopkeeper · ID 100</option>
+            <option value="1">Vendor · ID 1</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="conversationId">Conversation ID</label>
+          <input id="conversationId" type="number" min="1" value="1">
+        </div>
+
+        <button id="connectButton" type="button">Connect</button>
+      </div>
+
+      <div class="chat-title">
+        <h2 id="chatHeading">Conversation #1</h2>
+        <p>Messages are saved by your FastAPI backend.</p>
+      </div>
+
+      <div id="messages" aria-live="polite">
+        <div id="empty">Connect to load your conversation.</div>
+      </div>
+
+      <div id="notice">Choose a demo user and connect.</div>
+
+
+<section style="padding:16px;border-top:1px solid #e2e8f0">
+  <h3 style="margin:0 0 12px;font-size:15px">Share a file</h3>
+
+  <form id="attachmentForm"
+        style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+    <input
+      id="attachmentFile"
+      type="file"
+      accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,application/pdf,image/jpeg,image/png,image/gif,image/webp"
+      required
+      style="flex:1;min-width:180px"
+    >
+    <button id="uploadButton" type="submit">Upload</button>
+  </form>
+
+  <p style="font-size:12px;color:#64748b;margin:8px 0">
+    JPG, PNG, GIF, WEBP or PDF · Maximum 10 MB
+  </p>
+
+  <h3 style="margin:18px 0 10px;font-size:15px">Files in this conversation</h3>
+  <div id="attachmentsList" style="display:grid;gap:8px">
+    <p style="font-size:13px;color:#64748b">Connect to view shared files.</p>
+  </div>
+</section>
+
+
+      <form id="composer" class="composer">
+        <input
+          id="messageInput"
+          type="text"
+          maxlength="5000"
+          placeholder="Write a message..."
+          autocomplete="off"
+          required
+        >
+        <button id="sendButton" type="submit" disabled>Send</button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    const userSelect = document.getElementById("userId");
+    const conversationInput = document.getElementById("conversationId");
+    const connectButton = document.getElementById("connectButton");
+    const sendButton = document.getElementById("sendButton");
+    const composer = document.getElementById("composer");
+    const messageInput = document.getElementById("messageInput");
+    const messagesBox = document.getElementById("messages");
+    const statusBadge = document.getElementById("status");
+    const notice = document.getElementById("notice");
+    const chatHeading = document.getElementById("chatHeading");
+
+const attachmentForm = document.getElementById("attachmentForm");
+const attachmentFile = document.getElementById("attachmentFile");
+const uploadButton = document.getElementById("uploadButton");
+const attachmentsList = document.getElementById("attachmentsList");
+
+
+    let socket = null;
+    let currentUserId = null;
+    let currentConversationId = null;
+    let generation = 0;
+    const displayedMessageIds = new Set();
+
+    function setStatus(text, online = false) {
+      statusBadge.textContent = text;
+      statusBadge.className = "status " + (online ? "online" : "offline");
+      sendButton.disabled = !online || !socket ||
+        socket.readyState !== WebSocket.OPEN;
+    }
+
+    function showNotice(text) {
+      notice.textContent = text;
+    }
+
+    function clearMessages() {
+      messagesBox.replaceChildren();
+      displayedMessageIds.clear();
+    }
+
+    function renderMessage(message) {
+      if (displayedMessageIds.has(message.id)) return;
+      displayedMessageIds.add(message.id);
+
+      const empty = document.getElementById("empty");
+      if (empty) empty.remove();
+
+      const mine = Number(message.sender_id) === currentUserId;
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "message" + (mine ? " mine" : "");
+
+      const sender = document.createElement("div");
+      sender.className = "sender";
+      sender.textContent = mine
+        ? "You · ID " + message.sender_id
+        : "Other participant · ID " + message.sender_id;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = message.content;
+
+      const time = document.createElement("div");
+      time.className = "time";
+      const parsed = message.created_at
+        ? new Date(message.created_at)
+        : new Date();
+      time.textContent = Number.isNaN(parsed.getTime())
+        ? ""
+        : parsed.toLocaleTimeString([], {
+            hour: "2-digit", minute: "2-digit"
+          });
+
+      wrapper.append(sender, bubble, time);
+      messagesBox.appendChild(wrapper);
+      messagesBox.scrollTop = messagesBox.scrollHeight;
+    }
+
+    function closeSocket() {
+      if (socket) {
+        const oldSocket = socket;
+        socket = null;
+        oldSocket.close();
+      }
+      setStatus("Disconnected");
+    }
+
+    async function connectChat() {
+      const myGeneration = ++generation;
+      closeSocket();
+
+      const userId = Number(userSelect.value);
+      const conversationId = Number(conversationInput.value);
+
+      if (!Number.isInteger(userId) || userId <= 0 ||
+          !Number.isInteger(conversationId) || conversationId <= 0) {
+        showNotice("Enter valid user and conversation IDs.");
+        return;
+      }
+
+      currentUserId = userId;
+      currentConversationId = conversationId;
+      chatHeading.textContent = "Conversation #" + conversationId;
+      clearMessages();
+      showNotice("Loading conversation history...");
+
+      try {
+        const response = await fetch(
+          `/conversations/${conversationId}/messages?user_id=${userId}`
+        );
+
+        if (myGeneration !== generation) return;
+
+        if (!response.ok) {
+          throw new Error("Could not load history (HTTP " +
+            response.status + ").");
+        }
+
+        const history = await response.json();
+        history.forEach(renderMessage);
+        await loadAttachments();
+
+        if (myGeneration !== generation) return;
+
+        const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+        const url = `${scheme}//${location.host}/ws/conversations/${conversationId}?user_id=${userId}`;
+        socket = new WebSocket(url);
+
+        socket.onopen = () => {
+          if (myGeneration !== generation) return;
+          setStatus("Connected", true);
+          showNotice("Connected. Messages will appear in real time.");
+          messageInput.focus();
+        };
+
+        socket.onmessage = event => {
+          if (myGeneration !== generation) return;
+          try {
+            const message = JSON.parse(event.data);
+            if (message.error) {
+              showNotice(message.error);
+              return;
+            }
+            renderMessage(message);
+          } catch {
+            showNotice("Received an unreadable server response.");
+          }
+        };
+
+        socket.onerror = () => {
+          if (myGeneration === generation) {
+            showNotice("Connection error. Check that FastAPI is running.");
+          }
+        };
+
+        socket.onclose = () => {
+          if (myGeneration !== generation) return;
+          setStatus("Disconnected");
+          showNotice("Disconnected. Click Connect to try again.");
+        };
+      } catch (error) {
+        if (myGeneration !== generation) return;
+        showNotice(error.message);
+        setStatus("Connection failed");
+      }
+    }
+
+
+async function loadAttachments() {
+  attachmentsList.replaceChildren();
+
+  try {
+    const response = await fetch(
+      `/conversations/${currentConversationId}/attachments?user_id=${currentUserId}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`Could not load files (HTTP ${response.status}).`);
+    }
+
+    const files = await response.json();
+
+    if (files.length === 0) {
+      attachmentsList.textContent = "No files shared yet.";
+      return;
+    }
+
+    for (const file of files) {
+      const row = document.createElement("div");
+      row.style.cssText =
+        "display:flex;align-items:center;justify-content:space-between;" +
+        "gap:12px;padding:10px;border:1px solid #e2e8f0;border-radius:8px";
+
+      const details = document.createElement("div");
+      details.style.cssText = "min-width:0;overflow-wrap:anywhere";
+
+      const name = document.createElement("div");
+      name.textContent = file.original_filename;
+      name.style.fontWeight = "bold";
+
+      const meta = document.createElement("div");
+      meta.textContent =
+        `${file.content_type} · ${(file.size_bytes / 1024).toFixed(1)} KB`;
+      meta.style.cssText = "font-size:12px;color:#64748b;margin-top:4px";
+
+      details.append(name, meta);
+
+      const downloadButton = document.createElement("button");
+      downloadButton.type = "button";
+      downloadButton.textContent = "Download";
+
+      downloadButton.addEventListener("click", async () => {
+        downloadButton.disabled = true;
+
+        try {
+          const result = await fetch(
+            `/conversations/${currentConversationId}/attachments/${file.id}/download?user_id=${currentUserId}`
+          );
+
+          if (!result.ok) {
+            throw new Error("Could not generate download link.");
+          }
+
+          const data = await result.json();
+          const link = document.createElement("a");
+          link.href = data.download_url;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          link.click();
+        } catch (error) {
+          showNotice(error.message);
+        } finally {
+          downloadButton.disabled = false;
+        }
+      });
+
+      row.append(details, downloadButton);
+      attachmentsList.appendChild(row);
+    }
+  } catch (error) {
+    attachmentsList.textContent = error.message;
+  }
+}
+
+attachmentForm.addEventListener("submit", async event => {
+  event.preventDefault();
+
+  const file = attachmentFile.files[0];
+
+  if (!file) {
+    showNotice("Choose a file first.");
+    return;
+  }
+
+  if (file.size > 10 * 1024 * 1024) {
+    showNotice("File size must not exceed 10 MB.");
+    return;
+  }
+
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    showNotice("Connect to the conversation before uploading.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("sender_id", String(currentUserId));
+  formData.append("file", file);
+
+  uploadButton.disabled = true;
+  showNotice("Uploading file...");
+
+  try {
+    const response = await fetch(
+      `/conversations/${currentConversationId}/attachments`,
+      {
+        method: "POST",
+        body: formData
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.detail || "Upload failed.");
+    }
+
+    attachmentFile.value = "";
+    showNotice("File uploaded successfully.");
+    await loadAttachments();
+  } catch (error) {
+    showNotice(error.message);
+  } finally {
+    uploadButton.disabled = false;
+  }
+});
+
+
+    connectButton.addEventListener("click", connectChat);
+
+    composer.addEventListener("submit", event => {
+      event.preventDefault();
+      const content = messageInput.value.trim();
+
+      if (!content) return;
+
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        showNotice("Not connected. Click Connect first.");
+        return;
+      }
+
+      socket.send(JSON.stringify({ content }));
+      messageInput.value = "";
+      messageInput.focus();
+    });
+
+    window.addEventListener("beforeunload", closeSocket);
+  </script>
+</body>
+</html>
