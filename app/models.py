@@ -89,3 +89,25 @@ class Message(Base):
         server_default=func.now(),
         nullable=False
     )
+
+
+class ChatAttachment(Base):
+    __tablename__ = "chat_attachments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(
+        Integer,
+        ForeignKey("conversations.id"),
+        nullable=False,
+        index=True
+    )
+    sender_id = Column(Integer, nullable=False, index=True)
+    original_filename = Column(String(255), nullable=False)
+    storage_path = Column(String(500), nullable=False, unique=True)
+    content_type = Column(String(100), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False
+    )
