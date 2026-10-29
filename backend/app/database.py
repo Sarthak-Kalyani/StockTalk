@@ -46,3 +46,8 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def init_db():
+    """Create all tables. Used for development; production uses migrations."""
+    Base.metadata.create_all(bind=engine)
