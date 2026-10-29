@@ -1,0 +1,221 @@
+/**
+ * StockTalk Register Page.
+ *
+ * Dedicated registration page (separate from the split-screen AuthPage).
+ * Users create an account with email + password + business name. On success
+ * the backend issues a JWT access_token which is stored and used for all
+ * authenticated requests.
+ */
+import { useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { api } from "../services/api";
+import { setAuthToken, setStoredToken } from "../auth";
+import { FormField } from "../components/FormField";
+
+export default function RegisterPage({
+  onAuthenticated,
+}: {
+  onAuthenticated: () => void;
+}) {
+  const navigate = useNavigate();
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [businessName, setBusinessName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Password strength rules
+  const passwordRules = {
+    length: password.length >= 8,
+    lower: /[a-z]/.test(password),
+    upper: /[A-Z]/.test(password),
+    digit: /[0-9]/.test(password),
+  };
+  const passwordStrong =
+    passwordRules.length &&
+    passwordRules.lower &&
+    passwordRules.upper &&
+    passwordRules.digit;
+
+  const validate = (): boolean => {
+    const next: Record<string, string> = {};
+    if (!fullName.trim()) next.fullName = "Full name is required";
+    if (!email.trim()) next.email = "Email address is required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      next.email = "Please enter a valid email address";
+    if (!password) next.password = "Password is required";
+    else if (!passwordStrong)
+      next.password =
+        "Use 8+ characters with uppercase, lowercase, and a number";
+    if (password !== confirmPassword) next.confirmPassword = "Passwords do not match";
+    if (!businessName.trim()) next.businessName = "Business name is required";
+    setFieldErrors(next);
+    return Object.keys(next).length === 0;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!validate()) return;
+
+    setLoading(true);
+    try {
+      const data = await api.register({
+        email: email.trim(),
+        password,
+        role: "shopkeeper",
+        business_name: businessName.trim(),
+      });
+
+      const token = data.access_token as string;
+
+      setStoredToken(token);
+      setAuthToken(token);
+
+      setError(null);
+      onAuthenticated();
+      navigate("/");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Sign up failed. Please try again."
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4 py-12">
+      <div className="max-w-md w-full bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+        <div className="text-center mb-8">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center shadow-md">
+              <svg
+                className="w-6 h-6 text-white"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+              </svg>
+            </div>
+            <span className="text-2xl font-bold tracking-tight text-slate-900">
+              StockTalk
+            </span>
+          </div>
+          <h2 className="text-2xl font-bold text-slate-900 mb-2">Create an account</h2>
+          <p className="text-sm text-slate-600">
+            Join StockTalk to manage inventory and collaborate with suppliers.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <FormField
+            id="fullName"
+            label="Full name"
+            value={fullName}
+            onChange={setFullName}
+            placeholder="Jane Doe"
+            required
+            error={fieldErrors.fullName}
+          />
+          <FormField
+            id="email"
+            label="Email address"
+            type="email"
+            value={email}
+            onChange={setEmail}
+            placeholder="you@company.com"
+            required
+            error={fieldErrors.email}
+          />
+          <FormField
+            id="businessName"
+            label="Business name"
+            value={businessName}
+            onChange={setBusinessName}
+            placeholder="Acme Traders"
+            required
+            error={fieldErrors.businessName}
+          />
+          <FormField
+            id="password"
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+            placeholder="••••••••"
+            required
+            showPasswordToggle
+            error={fieldErrors.password || undefined}
+          />
+          {/* Password strength guidance (inline, non-blocking) */}
+          {password && (
+            <div className="mt-1 space-y-1">
+              <span className="text-xs font-medium text-slate-600">Password strength</span>
+              <div className="flex gap-1">
+                {[passwordRules.length, passwordRules.lower, passwordRules.upper, passwordRules.digit].map(
+                  (pass, i) => (
+                    <span
+                      key={i}
+                      className={`text-[10px] rounded px-1.5 py-0.5 ${
+                        pass
+                          ? "bg-green-100 text-green-700"
+                          : "bg-slate-200 text-slate-500"
+                      }`}
+                    >
+                      {["8+ chars", "lowercase", "uppercase", "number"][i]}
+                    </span>
+                  ),
+                )}
+              </div>
+            </div>
+          )}
+          <FormField
+            id="confirmPassword"
+            label="Confirm password"
+            type="password"
+            value={confirmPassword}
+            onChange={setConfirmPassword}
+            placeholder="••••••••"
+            required
+            showPasswordToggle
+            error={fieldErrors.confirmPassword}
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="flex w-full justify-center py-3 px-4 rounded-md border border-transparent shadow-sm text-sm font-semibold text-white bg-primary hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+          >
+            {loading ? "Creating account…" : "Create account"}
+          </button>
+
+          {error && (
+            <div className="rounded-md border border-destructive/20 bg-destructive/5 p-3 text-sm text-destructive" role="alert">
+              {error}
+            </div>
+          )}
+        </form>
+
+        <p className="mt-6 text-center text-sm text-slate-600">
+          Already have an account?{" "}
+          <Link
+            to="/signin"
+            className="font-medium text-primary hover:text-primary-hover focus:underline"
+          >
+            Sign in
+          </Link>
+        </p>
+      </div>
+    </div>
+  );
+}

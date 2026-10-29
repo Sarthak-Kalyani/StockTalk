@@ -1,6 +1,26 @@
+# Node
+node_modules/
+dist/
+*.log
+.env
+*.db
+data/
+
+# Python (legacy FastAPI — removed)
 .venv/
 __pycache__/
 *.py[cod]
-.env
 .pytest_cache/
 stocktalk_dev.db
+test.db
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

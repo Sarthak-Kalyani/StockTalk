@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: stocktalk-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist the SQLite database across container restarts.
+      # Mounting a directory (not a single file) so SQLite can create the .db
+      # file plus any WAL/SHM sidecar files alongside it.
+      - stocktalk_dev_data:/app/data
+    env_file:
+      - backend/.env
+    environment:
+      # Database file path inside the container
+      DATABASE_FILE: "/app/data/stocktalk_dev.db"
+      PORT: "8000"
+      NODE_ENV: "production"
+    # Bind to 0.0.0.0 is set in the Dockerfile CMD
+    restart: unless-stopped
+
+volumes:
+  stocktalk_dev_data:

@@ -10,7 +10,7 @@ A unified B2B platform for inventory, bill scanning, nearby vendors, communicati
 
 ```
 StockTalk/
-├── backend/              # FastAPI backend (Python)
+├── backend/              # Express.js + TypeScript backend (Node.js)
 ├── docs/                 # Architecture, schema, API contracts, decisions
 ├── frontend/             # React + Vite + Tailwind frontend (scaffold)
 ├── prd.md                # Product Requirements Document
@@ -24,51 +24,65 @@ StockTalk/
 |-----------|-------|--------|
 | 0 | Scope & team agreement | Done |
 | 1 | Project foundation (backend skeleton, health check, DB config, tests, frontend skeleton) | Done |
-| 2 | Authentication & role-based profiles (Supabase JWT, shopkeeper/vendor, business profiles) | Done |
+| 2 | Authentication & role-based profiles (Express JWT, shopkeeper/vendor, business profiles, SQLite) | Done |
 | 3–8 | Inventory, OCR/bills, vendor discovery, chat, orders/payments, integration/QA | In backlog |
 
 See `StockTalk_AI_Rules_and_Milestones.md` §6 for full exit criteria per milestone.
 
-## Quick start — Backend
+## Quick start — Backend (Express.js + TypeScript + SQLite)
 
-```bash
+```powershell
 cd backend
-cp .env.example .env   # fill in real values for Supabase / Razorpay / OCR if needed
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+cp .env.example .env   # edit JWT_SECRET for production
+npm install
+npm run dev            # tsx watch on http://localhost:8000
+```
+
+Or build and run the production server:
+
+```powershell
+cd backend
+npm run build
+npm start
 ```
 
 - Health check: `http://localhost:8000/health`
-- API docs: `http://localhost:8000/docs`
-- Run tests: `pytest`
+- Auth: `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me`
 
-Backend defaults to a local SQLite DB (`stocktalk_dev.db`) so you can run without any cloud credentials. Supabase/Razorpay/OCR credentials are only needed for live external services.
+Backend uses a local SQLite database persisted in `backend/data/`.
+
+### Docker
+
+```powershell
+# From the repo root
+docker-compose up --build
+```
 
 ## Quick start — Frontend
 
-```bash
+```powershell
 cd frontend
 npm install
-npm run dev   # Vite dev server, calls backend at VITE_API_URL
+npm run dev   # Vite dev server, calls backend at VITE_API_URL (default http://localhost:8000)
 ```
 
 ## Testing
 
-Backend tests use `pytest`. Run from `backend/`:
+The Express backend has no Python test suite. Type-check with:
 
-```bash
-pytest
+```powershell
+cd backend
+npx tsc --noEmit
 ```
 
 ## Tech stack
 
-- **Frontend:** React 18 + Vite + Tailwind CSS
-- **Backend:** Python + FastAPI
-- **Database:** PostgreSQL (Supabase); SQLite for local dev/tests
-- **Auth:** Supabase Auth (JWT), validated via JWKS
-- **OCR:** Google Cloud Vision API
-- **Payments:** Razorpay test mode
-- **File storage:** Supabase Storage (private buckets)
+- **Frontend:** React 19 + Vite + Tailwind CSS
+- **Backend:** Node.js + Express.js + TypeScript
+- **Database:** SQLite (via better-sqlite3)
+- **Auth:** Local JWT authentication (bcryptjs password hashing + jsonwebtoken)
+- **Payments:** Razorpay test mode (planned)
+- **File storage:** Local (planned: Supabase Storage)
 
 ## Conventions
 
